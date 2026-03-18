@@ -8,7 +8,8 @@ from urllib.parse import urlencode, urljoin
 PROJECT_ROOT = os.getcwd()
 
 def safe_path(path):
-    full_path = os.path.abspath(os.path.join(PROJECT_ROOT, path))
+    normalized_path = os.path.normpath(path)
+    full_path = os.path.abspath(os.path.join(PROJECT_ROOT, normalized_path))
     if not full_path.startswith(PROJECT_ROOT):
         raise ValueError("Access denied")
     return full_path
@@ -110,7 +111,8 @@ def main():
                 "parameters": {
                     "type": "object",
                 "properties": {
-                    "path": {"type": "string"}
+                    "path": {"type": "string"},
+                    "description": "Absolute path"
                 },
                 "required": ["path"]
                 }
@@ -124,7 +126,8 @@ def main():
                 "parameters": {
                     "type": "object",
                 "properties": {
-                    "path": {"type": "string"}
+                    "path": {"type": "string"},
+                    "description": "Absolute path"
                 },
                 "required": ["path"]
             }
@@ -140,6 +143,7 @@ def main():
                     "properties": {
                         "method": {"type": "string", "description": "HTTP method (GET, POST, etc.)"},
                         "path": {"type": "string", "description": "API path (e.g., /items/)"},
+                        "description": "Absolute path",
                         "body": {"type": "string", "description": "JSON body as string"},
                         "query": {
                             "type": "object",
@@ -374,6 +378,7 @@ ONLY call tools
 
                     output = {
                         "answer": answer,
+                        "source": source,
                         "tool_calls": tool_calls_log
                     }
 
@@ -399,47 +404,12 @@ ONLY call tools
 
             continue
 
-        # CASE 2: FINAL ANSWER
         else:
             messages.append({
             "role": "system",
             "content": (
                 "ERROR: You must ONLY respond with a valid JSON tool call.")
             })
-            final_text = message.content
-
-            # Expect JSON from model
-            try:
-                parsed = json.loads(final_text)
-                answer = parsed.get("answer", "")
-                source = parsed.get("source", "")
-            except:
-                answer = final_text
-                source = ""
-
-            # Safety net: require at least one tool call
-            if not tool_calls_log:
-                messages.append({"role": "system", "content": "You must call tools before answering."})
-                continue
-
-            # Determine if query_api was used
-            used_query_api = any(tc["tool"] == "query_api" for tc in tool_calls_log)
-
-            # Enforce source requirement
-            if not used_query_api and not source:
-                messages.append({"role": "system", "content": "Final answer must include 'source' field when not using query_api."})
-                continue
-
-            output = {
-                "answer": answer,
-                "tool_calls": tool_calls_log
-            }
-
-            if source:
-                output["source"] = source
-
-            print(json.dumps(output, indent=2))
-            return
 
     output = {
         "answer": "Unable to find answer within tool call limit.",
