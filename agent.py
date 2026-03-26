@@ -337,7 +337,7 @@ Provide answer:
                 config[key.strip()] = value.strip()
 
     api_key = config.get("LLM_API_KEY")
-    base_url = config.get("LLM_API_BASE")
+    base_url = config.get("LLM_API_BASE_URL")
     model = config.get("LLM_MODEL")
 
     config = {}
@@ -351,7 +351,7 @@ Provide answer:
                 config[key.strip()] = value.strip()
 
     lms_api_key = config.get("LMS_API_KEY")
-    agent_api_base_url = config.get("AGENT_API_BASE_URL")
+    agent_api_base_url = config.get("AGENT_API_BASE_URL", "http://localhost:42002")
 
     if not api_key or not base_url or not model:
         raise ValueError("Missing LLM environment variables")
