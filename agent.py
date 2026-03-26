@@ -4,7 +4,6 @@ from openai import OpenAI
 import os
 import requests
 from urllib.parse import urlencode, urljoin
-
 PROJECT_ROOT = os.getcwd()
 
 def safe_path(path):
@@ -112,7 +111,7 @@ def main():
                     "type": "object",
                 "properties": {
                     "path": {"type": "string"},
-                    "description": "Absolute path"
+                    "description": "relative path from project root"
                 },
                 "required": ["path"]
                 }
@@ -127,7 +126,7 @@ def main():
                     "type": "object",
                 "properties": {
                     "path": {"type": "string"},
-                    "description": "Absolute path"
+                    "description": "relative path from project root"
                 },
                 "required": ["path"]
             }
@@ -172,8 +171,8 @@ def main():
                     "properties": {
                         "answer": {"type": "string", "description": "final concise answer based on tool calls"},
                         "source": {"type": "string", "description": "source used for final answer. Always provide. Leave empty only in extreme cases where its not applicable."}
-            },
-            "required": ["answer"]
+                    },
+                    "required": ["answer"]
                 }
             }
         }
@@ -190,7 +189,7 @@ CORE BEHAVIOR (MANDATORY)
 
 1. You MUST call tools before answering.
 2. You MUST NOT provide any plain text responses.
-3. Every response MUST be a tool call.
+3. Every response MUST be a raw JSON tool call.
 4. The final answer MUST be produced using provide_answer().
 5. Maximum 10 tool calls total.
 
@@ -267,6 +266,58 @@ When you have enough information:
 DO NOT output text
 DO NOT explain reasoning
 ONLY call tools
+
+--------------------------------
+TOOL CALL EXAMPLES
+--------------------------------
+
+List files:
+
+{
+  "tool": "list_files",
+  "function": {
+    "name": "list_files",
+    "arguments": {"path": "backend/app/routers"}
+  }
+}
+
+Read a file:
+
+{
+  "tool": "read_file",
+  "function": {
+    "name": "read_file",
+    "arguments": {"path": "backend/app/routers/items.py"}
+  }
+}
+
+Call backend API:
+
+{
+  "tool": "query_api",
+  "function": {
+    "name": "query_api",
+    "arguments": {
+      "method": "GET",
+      "path": "/items/",
+      "query": {"lab": "lab1"},
+      "use_auth": true
+    }
+  }
+}
+
+Provide answer:
+
+{
+  "tool": "provide_answer",
+  "function": {
+    "name": "provide_answer",
+    "arguments": {
+      "answer": "The backend contains the following API router modules:\n\n- interactions.py — handles user interactions endpoints.\n- pipeline.py — handles data pipeline-related endpoints.\n- analytics.py — handles analytics endpoints.\n- learners.py — handles learner management endpoints.\n- items.py — handles item management endpoints.",
+      "source": "backend/app/routers"
+    }
+  }
+}
 """
 
     if len(sys.argv) < 2:
@@ -300,7 +351,7 @@ ONLY call tools
                 config[key.strip()] = value.strip()
 
     lms_api_key = config.get("LMS_API_KEY")
-    agent_api_base_url = config.get("AGENT_API_BASE_URL", "http://localhost:42002")
+    agent_api_base_url = config.get("AGENT_API_BASE_URL")
 
     if not api_key or not base_url or not model:
         raise ValueError("Missing LLM environment variables")
@@ -329,6 +380,17 @@ ONLY call tools
         )
 
         message = response.choices[0].message
+
+        tool_calls = getattr(message, "tool_calls", []) or []
+
+        '''if not tool_calls:
+            # Model did not produce a tool call, return safe JSON
+            print(json.dumps({
+                "answer": "Model did not return a tool call",
+                "source": "unknown",
+                "tool_calls": tool_calls_log
+            }, indent=2))
+            return'''
         
 
         # CASE 1: TOOL CALL
@@ -336,12 +398,18 @@ ONLY call tools
             messages.append(message)
 
             for tool_call in message.tool_calls:
-                name = tool_call.function.name
                 raw_args = tool_call.function.arguments
-                if not raw_args:
-                    args = {}
+                if isinstance(raw_args, str):
+                    try:
+                        args = json.loads(raw_args)
+                    except json.JSONDecodeError:
+                        args = {}
+                elif isinstance(raw_args, dict):
+                    args = raw_args
                 else:
-                    args = json.loads(raw_args)
+                    args = {}
+
+                name = tool_call.function.name
 
                 if name == "list_files":
                     result = list_files(args["path"])
@@ -364,7 +432,6 @@ ONLY call tools
                     # Safety net: require at least one tool call
                     if not tool_calls_log:
                         messages.append({"role": "system", "content": "You must call tools before answering."})
-                        print("You must call tools before answering.")
                         continue
 
                     # Determine if query_api was used
@@ -373,17 +440,13 @@ ONLY call tools
                     # Enforce source requirement
                     if not used_query_api and not source:
                         messages.append({"role": "system", "content": "Final answer must include 'source' field when not using query_api."})
-                        print("Final answer must include 'source' field when not using query_api.")
                         continue
 
                     output = {
                         "answer": answer,
-                        "source": source,
+                        "source": source if source else "",
                         "tool_calls": tool_calls_log
                     }
-
-                    if source:
-                        output["source"] = source
 
                     print(json.dumps(output, indent=2))
                     return
@@ -403,12 +466,12 @@ ONLY call tools
                 })
 
             continue
-
+        
         else:
             messages.append({
             "role": "system",
             "content": (
-                "ERROR: You must ONLY respond with a valid JSON tool call.")
+                "ERROR. Output MUST be a raw JSON tool call. If you want to provide final answer, use provide_answer function.")
             })
 
     output = {
