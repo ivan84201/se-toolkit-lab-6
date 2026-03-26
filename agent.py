@@ -337,7 +337,7 @@ Provide answer:
                 config[key.strip()] = value.strip()
 
     api_key = config.get("LLM_API_KEY")
-    base_url = config.get("LLM_API_BASE_URL")
+    base_url = config.get("LLM_API_BASE")
     model = config.get("LLM_MODEL")
 
     config = {}
